@@ -7,8 +7,10 @@ import os
 from time import sleep
 
 
+RefreshMSPdb: bool = False
+
 # Contains list of top 500 MSPs
-# MSPsTopUrl: str = 'https://www.crn.com/rankings-and-lists/msp2023.htm'
+MSPsTopUrl: str = 'https://www.crn.com/rankings-and-lists/msp2023.htm'
 def MSPsDetailUrl(c: int) -> str:
     return 'https://data.crn.com/2023/detail-handler.php?c={}&r=45'.format(c)
 
@@ -18,25 +20,32 @@ ApolloAPIUrl: str = 'https://api.apollo.io/v1/'
 
 
 def getMSPs(db):
+
     # Wipe table and increment counter
     db.execute('''Delete from MSPs''')
     db.execute('''Delete from SQLITE_SEQUENCE where name='MSPs' ''')
 
+    # Parse page containing top 500 MSPs
+    tree = html.fromstring(requests.get(MSPsTopUrl).text)
+
+    # Capture key used by page to identify top 500 MSPs in order
+    MSPKeys = [MSPKey.split('=')[1] for MSPKey in tree.xpath("//div[contains(concat(' ',normalize-space(@class),' '),' data1 ')]/a/@href")]
+    print(MSPKeys)
+
     MSPs = []
+    # Iterate through keys to collect information about MSPs
+    for key in MSPKeys:
 
-    for i in range(1, 501):
-
-        # Avoid spamming server
+        # Avoid sending too many requests while scraping
         sleep(1)
 
         # Get info about a MSP from their server, and store the name and url (sans the scheme & subdomain)
-        MSP = requests.get(MSPsDetailUrl(i)).json()
+        MSP = requests.get(MSPsDetailUrl(key)).json()
         MSPs.append( (MSP['Company'], MSP['URL'].removeprefix('https://www.')) )
 
-        # Debug info
         print(MSP)
 
-    # Insert info about MSP into our DB
+    # Insert info about MSPs into our DB
     db.executemany('''insert into MSPs (name, url) values (?, ?)''', MSPs)
 
 
@@ -49,17 +58,13 @@ def main():
         with closing(connection.cursor()) as cursor:
 
             # Save top 500 MSPs to MSPs table in db
-            getMSPs(cursor)
-
-            # Print MSPs
-            # cursor.execute("SELECT * FROM MSPs")
-            # rows = cursor.fetchall()
-            # print(rows)
+            if RefreshMSPdb: getMSPs(cursor)
+            else: print('Skipping db update...')
 
             cursor.execute('SELECT url FROM MSPs LIMIT 1')
 
             # Request CEO info from apollo about first company
-            response = requests.post(ApolloAPIUrl + 'mixed_people/search',
+            name = requests.post(ApolloAPIUrl + 'mixed_people/search',
                                      headers={
                                          "Content-Type": "application/json",
                                          "Cache-Control": "no-cache"
@@ -72,10 +77,10 @@ def main():
                                      '"person_titles" : ["Chief Executive Officer"]'
                                      '}',
 
-                                     ).json()
+                                     ).json()['people'][0]['name']
 
 
-            print(response)
+            print(name)
 
         # Persist changes to db
         connection.commit()
