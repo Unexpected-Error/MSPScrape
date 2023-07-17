@@ -1,0 +1,1 @@
+create table MSPs (id integer primary key AUTOINCREMENT, name TEXT, url TEXT)
