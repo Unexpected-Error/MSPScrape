@@ -1,0 +1,8 @@
+name: Scrape
+channels:
+  - defaults
+dependencies:
+  - python=3.10
+  - requests
+  - lxml
+  - python-dotenv

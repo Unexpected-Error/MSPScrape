@@ -6,8 +6,8 @@ from dotenv import load_dotenv
 import os
 from time import sleep
 from apollo import ApolloAPI
+import argparse
 
-RefreshMSPdb: bool = False  # Set to true on first run to scrape MSPs and populate db
 
 # Contains list of top 500 MSPs
 MSPsTopUrl: str = 'https://www.crn.com/rankings-and-lists/msp2023.htm'
@@ -60,7 +60,7 @@ def getCEOs(db):
     for i, (orgid, url) in enumerate([(row[0], row[2]) for row in rows]):
 
         # only try a few, otherwise the free tier api limits don't last long
-        if i == 45:
+        if i == 2:
             break
 
         # Collect the CEO's info
@@ -87,15 +87,24 @@ def main():
         with closing(connection.cursor()) as cursor:
 
             # Save top 500 MSPs to MSPs table in db
-            if RefreshMSPdb:
+            if args.refresh_MSPs or args.refresh:
                 getMSPs(cursor)
             else:
                 print('Skipping MSP table update...')
-            getCEOs(cursor)
+            if args.refresh_vip or args.refresh:
+                getCEOs(cursor)
+            else:
+                print('Skipping VIPs table update...')
 
         # Persist changes to db
         connection.commit()
 
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument('-r', '--refresh', help='wipes entire db and loads in fresh data', action='store_true')
+    group.add_argument('-rv', '--refresh_vip', help='wipes only VIPs and loads in fresh data', action='store_true')
+    group.add_argument('-rm', '--refresh_MSPs', help='wipes only MSPs and loads in fresh data', action='store_true')
+    args = parser.parse_args()
     main()
