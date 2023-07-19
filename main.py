@@ -7,9 +7,7 @@ import os
 from time import sleep
 from apollo import ApolloAPI
 
-RefreshMSPdb: bool = False
-
-# today's todos: filter by currently working there on org id, add rate limit handling
+RefreshMSPdb: bool = False  # Set to true on first run to scrape MSPs and populate db
 
 # Contains list of top 500 MSPs
 MSPsTopUrl: str = 'https://www.crn.com/rankings-and-lists/msp2023.htm'
@@ -50,34 +48,34 @@ def getMSPs(db):
 
 def getCEOs(db):
     api = ApolloAPI(os.getenv('APOLLO_API_KEY'))
-    # Get all MSP
+
+    # Wipe table and increment counter
+    db.execute('''Delete from VIPs''')
+    db.execute('''Delete from SQLITE_SEQUENCE where name='VIPs' ''')
+
+    # Get all MSPs, so we can get people data about all of them
     db.execute("SELECT * FROM MSPs")
     rows = db.fetchall()
 
     for i, (orgid, url) in enumerate([(row[0], row[2]) for row in rows]):
-        if i == 5: break
-        # try:
-        #     print(api.getOrgIDs(url))
-        # except:
-        #     print('failed')
-        # print('index: ' + str(i) + '\nUrl: ' + url)
 
+        # only try a few, otherwise the free tier api limits don't last long
+        if i == 45:
+            break
+
+        # Collect the CEO's info
         try:
-            people = api.getPeopleFiltered(url)
-        except RuntimeError:
+            people = api.getPeopleFiltered(url, "Chief Executive Officer")
+        except RuntimeError:  # Apollo might not have info to return, so just move on to the next
             continue
 
+        # Parse info and store it in our db
         data = [(orgid, person['first_name'], person['last_name'], person['email'],
                  person['phone_numbers'][0]['sanitized_number']) for person in people]
 
         db.executemany('''insert into VIPs (msp_id, firstName, lastName, email, phoneNumber) values ( ?, ?, ?, ?, ?)''',
                        data)
-
-        length = len(people)
-        print(length)
-
-    # db.execute("SELECT COUNT(*) FROM MSPs")
-    # for i in range(0,db.fetchone()[0]):
+        print('Stored Ceo number ' + str(i))
 
 
 def main():
@@ -92,15 +90,8 @@ def main():
             if RefreshMSPdb:
                 getMSPs(cursor)
             else:
-                print('Skipping db update...')
-
+                print('Skipping MSP table update...')
             getCEOs(cursor)
-
-            # cursor.execute('SELECT url FROM MSPs LIMIT 1')
-
-            # Request CEO info from apollo about first company
-
-            # print(name)
 
         # Persist changes to db
         connection.commit()

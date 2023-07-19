@@ -1,5 +1,6 @@
 import requests
 from dataclasses import dataclass
+from time import sleep
 
 
 @dataclass
@@ -10,6 +11,15 @@ class RequestRemaining:
 
     def canrequest(self) -> bool:
         return self.minute > 0 and self.hour > 0 and self.day > 0
+
+    # Number of seconds before you can safely request again
+    def nextrequest(self) -> int:
+        if self.day == 0:
+            return 24 * 60 * 60
+        if self.hour == 0:
+            return 60 * 60
+        if self.minute == 0:
+            return 60
 
 
 class ApolloAPI:
@@ -38,7 +48,9 @@ class ApolloAPI:
     def getPeople(self, domains: [str], titles: [str] = None):
 
         if self.__isratelimit():
-            raise RuntimeError('RATE LIMITED')
+            print('WARNING: Out of requests, waiting ' + str(self.requestsLeft.nextrequest()) + ' sec')
+            sleep(self.requestsLeft.nextrequest())
+
         if titles is None:
             titles = ["Chief Executive Officer", ]
         if isinstance(domains, str):
@@ -62,6 +74,8 @@ class ApolloAPI:
                              json=data
                              )
         self.__setratelimit(resp)
+        if len(resp.json()['people']) == 0:
+            raise RuntimeError
         return resp.json()['people']
 
     # Takes a singular or list of domains and titles, returns a list of people, additionally filtered for currency
@@ -75,7 +89,8 @@ class ApolloAPI:
     # Takes a domain and returns {domain: id,}
     def __getOrgID(self, domain: str) -> [(str, str)]:
         if self.__isratelimit():
-            raise RuntimeError('RATE LIMITED')
+            print('WARNING: Out of requests, waiting ' + str(self.requestsLeft.nextrequest()) + ' sec')
+            sleep(self.requestsLeft.nextrequest())
 
         headers = {
             "Content-Type": "application/json",
@@ -91,6 +106,9 @@ class ApolloAPI:
                              json=data
                              )
         self.__setratelimit(resp)
+        if len(resp.json()) == 0:
+            raise RuntimeError
+        test = resp.json()
         return {resp.json()['organization']['name']: resp.json()['organization']['id'], }
 
     # Takes a list of domains and returns a dictionary of {domain: id,}
@@ -99,7 +117,8 @@ class ApolloAPI:
             return self.__getOrgID(domains)
 
         if self.__isratelimit():
-            raise RuntimeError('RATE LIMITED')
+            print('WARNING: Out of requests, waiting ' + str(self.requestsLeft.nextrequest()) + ' sec')
+            sleep(self.requestsLeft.nextrequest())
 
         headers = {
             "Content-Type": "application/json",
