@@ -6,11 +6,10 @@ from dotenv import load_dotenv
 import os
 from time import sleep
 from apollo import ApolloAPI
-import sys
 
 RefreshMSPdb: bool = False
 
-# today's todos: filter by currently working there on org id, add rate limit handeling
+# today's todos: filter by currently working there on org id, add rate limit handling
 
 # Contains list of top 500 MSPs
 MSPsTopUrl: str = 'https://www.crn.com/rankings-and-lists/msp2023.htm'
@@ -52,24 +51,30 @@ def getMSPs(db):
 def getCEOs(db):
     api = ApolloAPI(os.getenv('APOLLO_API_KEY'))
     # Get all MSP
-    db.execute("SELECT (url) FROM MSPs")
+    db.execute("SELECT * FROM MSPs")
     rows = db.fetchall()
-    # print(api.getPeople([rows[0][0],]))
 
-    for i, url in enumerate([row[0] for row in rows]):
-        if i == 50: break
-        try:
-            print(api.getOrgIDs(url))
-        except:
-            print('failed')
-        # print('index: ' + str(i) + '\nUrl: ' + url)
+    for i, (orgid, url) in enumerate([(row[0], row[2]) for row in rows]):
+        if i == 5: break
         # try:
-        #     person = api.getPeopleFiltered(url)
-        # except RuntimeError:
-        #     sys.exit(1)
-        #
-        # length = len(person)
-        # print(length)
+        #     print(api.getOrgIDs(url))
+        # except:
+        #     print('failed')
+        # print('index: ' + str(i) + '\nUrl: ' + url)
+
+        try:
+            people = api.getPeopleFiltered(url)
+        except RuntimeError:
+            continue
+
+        data = [(orgid, person['first_name'], person['last_name'], person['email'],
+                 person['phone_numbers'][0]['sanitized_number']) for person in people]
+
+        db.executemany('''insert into VIPs (msp_id, firstName, lastName, email, phoneNumber) values ( ?, ?, ?, ?, ?)''',
+                       data)
+
+        length = len(people)
+        print(length)
 
     # db.execute("SELECT COUNT(*) FROM MSPs")
     # for i in range(0,db.fetchone()[0]):
