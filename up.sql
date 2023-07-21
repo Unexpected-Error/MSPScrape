@@ -11,9 +11,10 @@ create table VIPs
     msp_id INTEGER,
     firstName TEXT,
     lastName TEXT,
+    title TEXT,
     email TEXT,
     phoneNumber TEXT,
     FOREIGN KEY (msp_id) REFERENCES MSPs(id)
 )
 
---  first name, last name, email, phone numbers
+--  first name, last name, title, email, phone numbers

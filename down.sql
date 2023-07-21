@@ -1,2 +1,4 @@
 DROP TABLE MSPs;
+
 DROP TABLE VIPs;
+Delete from SQLITE_SEQUENCE where name='VIPs'

@@ -1,81 +1,91 @@
+from contextlib import closing
+import os
+from time import sleep
+import warnings
+import argparse
 import sqlite3
 import requests
 from lxml import html
-from contextlib import closing
 from dotenv import load_dotenv
-import os
-from time import sleep
 from apollo import ApolloAPI
-import argparse
+
+# List of titles to search
+titles = ['Chief Executive Officer', 'CEO',
+          'Chief Product Officer', 'CPO',
+          'Chief Innovation Officer', 'CIO',
+          'VP operations', 'VP of operations', 'VPO',
+          'Chief Operating Officer', ' COO',
+          'Chief Technology Officer', 'CTO'
+          ]
 
 
-# Contains list of top 500 MSPs
-MSPsTopUrl: str = 'https://www.crn.com/rankings-and-lists/msp2023.htm'
-
-
-def MSPsDetailUrl(c: int) -> str:
-    return 'https://data.crn.com/2023/detail-handler.php?c={}&r=45'.format(c)
-
-
-def getMSPs(db):
+def get_msps(cursor):
     # Wipe table and increment counter
-    db.execute('''Delete from MSPs''')
-    db.execute('''Delete from SQLITE_SEQUENCE where name='MSPs' ''')
+    # noinspection SqlWithoutWhere
+    cursor.execute('''Delete from MSPs''')
+    cursor.execute('''Delete from SQLITE_SEQUENCE where name='MSPs' ''')
 
     # Parse page containing top 500 MSPs
-    tree = html.fromstring(requests.get(MSPsTopUrl).text)
+    tree = html.fromstring(requests.get('https://www.crn.com/rankings-and-lists/msp2023.htm',
+                                        timeout=10).text)
 
     # Capture key used by page to identify top 500 MSPs in order
-    MSPKeys = [MSPKey.split('=')[1] for MSPKey in
-               tree.xpath("//div[contains(concat(' ',normalize-space(@class),' '),' data1 ')]/a/@href")]
-    print(MSPKeys)
+    msp_keys = [msp_key.split('=')[1] for msp_key in
+                tree.xpath(
+                    "//div[contains(concat(' ',normalize-space(@class),' '),' data1 ')]/a/@href")]
 
-    MSPs = []
+    msps = []
     # Iterate through keys to collect information about MSPs
-    for key in MSPKeys:
+    for key in msp_keys:
         # Avoid sending too many requests while scraping
-        sleep(1)
+        sleep(0.6)
 
-        # Get info about a MSP from their server, and store the name and url (sans the scheme & subdomain)
-        MSP = requests.get(MSPsDetailUrl(key)).json()
-        MSPs.append((MSP['Company'], MSP['URL'].removeprefix('https://www.')))
+        # Get info about a MSP from their server, and store the name and domain.tld
+        msp = requests.get(f'https://data.crn.com/2023/detail-handler.php?c={key}&r=45',
+                           timeout=10).json()
+        msps.append((msp['Company'], msp['URL'].removeprefix('https://www.')))
 
-        print(MSP)
+        print(msp)
 
     # Insert info about MSPs into our DB
-    db.executemany('''insert into MSPs (name, url) values (?, ?)''', MSPs)
+    cursor.executemany('''insert into MSPs (name, url) values (?, ?)''', msps)
 
 
-def getCEOs(db):
+def get_vips(cursor):
     api = ApolloAPI(os.getenv('APOLLO_API_KEY'))
 
     # Wipe table and increment counter
-    db.execute('''Delete from VIPs''')
-    db.execute('''Delete from SQLITE_SEQUENCE where name='VIPs' ''')
+    # noinspection SqlWithoutWhere
+    cursor.execute('''Delete from VIPs''')
+    cursor.execute('''Delete from SQLITE_SEQUENCE where name='VIPs' ''')
 
     # Get all MSPs, so we can get people data about all of them
-    db.execute("SELECT * FROM MSPs")
-    rows = db.fetchall()
+    cursor.execute("SELECT * FROM MSPs")
+    rows = cursor.fetchall()
 
-    for i, (orgid, url) in enumerate([(row[0], row[2]) for row in rows]):
+    for i, (msp_id, url) in enumerate([(row[0], row[2]) for row in rows]):
 
         # only try a few, otherwise the free tier api limits don't last long
-        if i == 2:
+        if i == 150:
             break
 
-        # Collect the CEO's info
-        try:
-            people = api.getPeopleFiltered(url, "Chief Executive Officer")
-        except RuntimeError:  # Apollo might not have info to return, so just move on to the next
+        # Collect the VIPs's info
+        people = api.get_people_filtered(url, titles)
+
+        # Apollo might not have info to return, so just move on to the next
+        if len(people) == 0:
+            warnings.warn('No VIPs returned for (url, titles) pair: ' + str(url) + str(titles),
+                          UserWarning)
             continue
 
         # Parse info and store it in our db
-        data = [(orgid, person['first_name'], person['last_name'], person['email'],
+        data = [(msp_id, person['first_name'], person['last_name'], person['title'], person['email'],
                  person['phone_numbers'][0]['sanitized_number']) for person in people]
 
-        db.executemany('''insert into VIPs (msp_id, firstName, lastName, email, phoneNumber) values ( ?, ?, ?, ?, ?)''',
-                       data)
-        print('Stored Ceo number ' + str(i))
+        cursor.executemany(
+            '''insert into VIPs (msp_id, firstName, lastName, title, email, phoneNumber) '''
+            '''values ( ?, ?, ?, ?, ?, ?)''', data)
+        print('Stored VIPs, org number ' + str(i))
 
 
 def main():
@@ -87,12 +97,12 @@ def main():
         with closing(connection.cursor()) as cursor:
 
             # Save top 500 MSPs to MSPs table in db
-            if args.refresh_MSPs or args.refresh:
-                getMSPs(cursor)
+            if args.refresh_msps or args.refresh:
+                get_msps(cursor)
             else:
                 print('Skipping MSP table update...')
-            if args.refresh_vip or args.refresh:
-                getCEOs(cursor)
+            if args.refresh_vips or args.refresh:
+                get_vips(cursor)
             else:
                 print('Skipping VIPs table update...')
 
@@ -103,8 +113,11 @@ def main():
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     group = parser.add_mutually_exclusive_group()
-    group.add_argument('-r', '--refresh', help='wipes entire db and loads in fresh data', action='store_true')
-    group.add_argument('-rv', '--refresh_vip', help='wipes only VIPs and loads in fresh data', action='store_true')
-    group.add_argument('-rm', '--refresh_MSPs', help='wipes only MSPs and loads in fresh data', action='store_true')
+    group.add_argument('-r', '--refresh', help='wipes entire db and loads in fresh data',
+                       action='store_true')
+    group.add_argument('-rv', '--refresh_vips', help='wipes only VIPs and loads in fresh data',
+                       action='store_true')
+    group.add_argument('-rm', '--refresh_msps', help='wipes only MSPs and loads in fresh data',
+                       action='store_true')
     args = parser.parse_args()
     main()
