@@ -123,12 +123,6 @@ class ApolloAPI:
         :rtype: list
         """
 
-        if self.__is_rate_limit():
-            warnings.warn(
-                'Out of requests, waiting ' + str(self.requests_left.next_request()) + ' sec',
-                UserWarning)
-            sleep(self.requests_left.next_request())
-
         if titles is None:
             titles = ["Chief Executive Officer", ]
         if isinstance(domains, str):
@@ -264,9 +258,8 @@ class ApolloAPI:
             self.__set_rate_limit(resp)
 
             if resp.status_code == 429:
-                warnings.warn(
-                    'Too many requests sent, unexpected 429. Attempting to retry after waiting '
-                    + str(self.requests_left.next_request()) + ' sec')
+                warnings.warn(f'Too many requests sent, unexpected 429. Attempting to retry after'
+                              f' waiting {self.requests_left.next_request()} sec')
                 sleep(self.requests_left.next_request())
                 continue
             if resp.status_code == 200:
