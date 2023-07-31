@@ -1,20 +1,19 @@
-create table MSPs
+CREATE TABLE IF NOT EXISTS MSPs
 (
-    id   INTEGER primary key AUTOINCREMENT,
-    name TEXT,
-    url  TEXT
+    ID   INTEGER primary key AUTOINCREMENT,
+    Name TEXT,
+    URL  TEXT,
+    CompanyNumber TEXT
 );
 
-create table VIPs
+CREATE TABLE IF NOT EXISTS VIPs
 (
-    id   INTEGER primary key AUTOINCREMENT,
-    msp_id INTEGER,
-    firstName TEXT,
-    lastName TEXT,
-    title TEXT,
-    email TEXT,
-    phoneNumber TEXT,
-    FOREIGN KEY (msp_id) REFERENCES MSPs(id)
+    ID   INTEGER primary key AUTOINCREMENT,
+    MSPID INTEGER,
+    FirstName TEXT,
+    LastName TEXT,
+    Title TEXT,
+    Email TEXT,
+    Phone TEXT,
+    FOREIGN KEY (MSPID) REFERENCES MSPs(ID)
 )
-
---  first name, last name, title, email, phone numbers
