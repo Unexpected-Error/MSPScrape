@@ -10,16 +10,17 @@ import requests
 from lxml import html
 from dotenv import load_dotenv
 from apollo import ApolloAPI
-from seamless import extract_cleaned
+from seamless import Seamless
 
 # List of titles to search
-titles = ['Chief Executive Officer', 'CEO',
-          'Chief Product Officer', 'CPO',
-          'Chief Innovation Officer', 'CIO',
-          'VP operations', 'VP of operations', 'VPO',
-          'Chief Operating Officer', ' COO',
-          'Chief Technology Officer', 'CTO'
-          ]
+titles = [
+    # 'Chief Executive Officer', 'CEO',
+    # 'Chief Product Officer', 'CPO',
+    'Chief Innovation Officer', 'CIO',
+    'VP operations', 'VP of operations', 'VPO',
+    'Chief Operating Officer', ' COO',
+    'Chief Technology Officer', 'CTO'
+]
 
 
 def get_msps(connection, over_write):
@@ -161,8 +162,40 @@ def main():
             print('Skipping VIPs table update...')
 
         with closing(connection.cursor()) as cursor:
+            if args.seamless_update is not None:
+                credits_remaining = args.seamless_update
+                with Seamless(os.getenv('SEAMLESS_USER'), os.getenv('SEAMLESS_PASS')) as scraper:
+                    # get missing MSPs
+                    cursor.execute("WITH Numbers AS ("
+                                   "SELECT 1 AS num "
+                                   "UNION ALL "
+                                   "SELECT num + 1 "
+                                   "FROM Numbers "
+                                   "WHERE num < 500"
+                                   ") "
+                                   "SELECT num "
+                                   "FROM Numbers "
+                                   "LEFT JOIN VIPs ON Numbers.num = VIPs.MSPID "
+                                   "WHERE VIPs.MSPID IS NULL;")
+                    keys = [key[0] for key in cursor.fetchall()]
+                    cursor.execute(
+                        f"SELECT * FROM main.MSPs WHERE ID IN ({','.join(map(str, keys))});")
+                    missed_msps = cursor.fetchall()
+                    for (msp_id, name, url, _) in missed_msps:
+                        data = scraper.seamless_scrape_vips([url], titles, credits_remaining)
+                        credits_remaining -= data[1]
+                        results = data[0]
+                        print(f'Inserting {len(results)} contacts for {name}, {credits_remaining} '
+                              f'credits remaining')
+                        cursor.executemany(
+                            '''insert into VIPs (MSPID, FirstName, LastName, Title, Email) '''
+                            '''values ( ?, ?, ?, ?, ?)''',
+                            [(msp_id,) + result for result in results])
+            else:
+                print("Not scraping seamless")
+
             if args.clean_csv is not None:
-                data = extract_cleaned(args.clean_csv, 70)
+                data = Seamless.extract_cleaned(args.clean_csv, 70)
                 for key, value in data.items():
                     if value.get('email', False):
                         if value.get('phone', False):
@@ -202,19 +235,22 @@ def main():
                         else:
                             print(f'value {value}  did not have phone or email')
                 connection.commit()
+            else:
+                print("No cleaned data")
 
             if args.output_dir is not None:
                 # Export db as csv
                 if args.output_all:
                     cursor.execute(
                         '''
-                        SELECT FirstName, LastName, MSPs.Name
+                        SELECT MSPs.ID, MSPs.Name, URL, CompanyNumber, VP.ID, FirstName, LastName, Title, Email, Phone
                         FROM MSPs
                         LEFT JOIN VIPs VP on MSPs.ID = VP.MSPID
                         WHERE 
                             Name IS NOT NULL
                             AND FirstName IS NOT NULL
                             AND LastName IS NOT NULL
+                            AND Email IS NOT NULL
                         ''')
 
                     data = cursor.fetchall()
@@ -262,6 +298,8 @@ if __name__ == '__main__':
                         action='store_true')
     parser.add_argument('-rm', '--refresh_msps', help='refreshes MSPs table',
                         action='store_true')
+    parser.add_argument('-su', '--seamless_update', help='scrapes seamless with n credits',
+                        type=int)
     group = parser.add_mutually_exclusive_group()
     group.add_argument('-om', '--output_missing', help='outputs missing MSPs',
                        action='store_true')
